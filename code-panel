@@ -1,0 +1,251 @@
+//librerias
+#include <EEPROM.h>
+#include <Wire.h>
+#include "RTClib.h"
+RTC_DS1307 rtc;
+
+//▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+//PINES DE SALIDA PARA CONTROLAR LOS LEDS
+#define led_green 5
+#define led_yellow 6
+#define led_red 7
+
+byte clockpin = 12;  //Cuando ay que leer los bit      SH
+byte data = 10;      //Envio datos                     DS
+byte latch = 11;     //indica pin de salida en el chip ST
+
+byte clockpinMatrix = 16;  //Cuando ay que leer los bit      SH
+byte dataMatrix = 14;      //Envio datos                     DS
+byte latchMatrix = 15;     //indica pin de salida en el chip ST
+//▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄
+
+//======================== DATOS CONVERSION ENTEROS A BINARIOS =================================
+const int NUM[] = {
+  63,   //Numero 0 en binario es : 00111111 = 0
+  6,    //Numero 1 en binario es : 00000110 = 1
+  91,   //Numero 2 en binario es : 01011011 = 2
+  79,   //Numero 3 en binario es : 01001111 = 3
+  102,  //Numero 4 en binario es : 01100110 = 4
+  109,  //Numero 5 en binario es : 01101101 = 5
+  125,  //Numero 6 en binario es : 01111101 = 6
+  7,    //Numero 7 en binario es : 00000111 = 7
+  127,  //Numero 8 en binario es : 01111111 = 8
+  111,  //Numero 9 en binario es : 01101111 = 9
+  63,   //Numero 0 en binario es : 00111111 = 10
+  0,    //Numero 0 en binario es : 00000000 = APAGADO
+};
+
+const int NUM_MATRIX_ROW[] = {
+  4, 8, 16,                //
+  2, 4, 8, 16, 32,         //
+  1, 2, 4, 8, 16, 32, 64,  //
+  1, 2, 4, 8, 16, 32, 64,  //
+  2, 4, 8, 16, 32,         //
+  4, 8, 16,                //
+};
+
+const int NUM_MATRIX_COLUM[] = {
+  1,
+  2,
+  4,
+  8,
+  16,
+  32,
+  64,
+};
+//==============================================================================================
+
+///////////////////////////////////// VARIABLES PARA CONTEO DE DISPLAYS /////////////////////////////
+//GENERAL
+byte contador_total_dias_DISPLAY[3] = { 0, 0, 0 };
+byte contador_record_DISPLAY[3] = { 0, 0, 0 };
+
+//PIRAMIDE
+byte contador_fatal = 0;  // se usa directo al display
+byte contador_incapacitantes_DISPLAY[2] = { 0, 0 };
+byte contador_leve_DISPLAY[3] = { 0, 0, 0 };
+int contador_incidentes_DISPLAY[4] = { 0, 0, 0, 0 };
+int contador_subestandard_DISPLAY[5] = { 0, 0, 0, 0, 0 };
+
+byte semaforo_state = 0;
+
+////////////////////////MEMORIA GENERAL
+int dias_del_anio;
+int contador_total_dias_M = 0;  //Memoria total dias
+int contador_record_M = 0;      //Memoria record alcanzado
+
+//MEMORIA PIRAMIDE
+byte contador_incapacitantes_M = 0;  //Memoria incapacitantes
+int contador_leve_M = 0;             //Memoria leve
+int contador_incidentes_M = 0;       //Memoria incidentes
+unsigned long contador_subestandard_M = 0;     //Memoria subestandard
+
+byte semaforo_verde_M = 0;
+byte semaforo_amarillo_M = 0;
+byte semaforo_rojo_M = 0;
+
+////////////////////////DIRECCION PARA ALMACENAR EN LA MENORIA EEPROM
+int direc_total_dias = 0;  // Direccion EEPROM para almacenar los valores de total Dias
+int direc_record = 3;      // Direccion EEPROM para almacenar los valores de record de  Dias
+//Piramide
+int direc_fatal = 6;           // Direccion EEPROM para almacenar los valores de accidentes fatales
+int direc_incapacitantes = 9;  // Direccion EEPROM para almacenar los valores de accidentes incapacitantes
+int direc_leve = 12;           // Direccion EEPROM para almacenar los valores de accidentes leves
+int direc_incidentes = 15;     // Direccion EEPROM para almacenar los valores de incidentes
+int direc_subestandard =30;   // Direccion EEPROM para almacenar los valores de Subestandard
+
+byte direc_semaforo_state = 50;
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////
+int matrix_cont_COLUM = 0;
+int matrix_cont_FILA = 0;
+byte month_cont = 0;
+byte days_month_cont = 0;
+bool months_31 = false;
+
+void setup() {
+  rtc.begin();
+  Wire.begin();
+  
+  // OUTPUTS to 74HC959
+  pinMode(clockpin, OUTPUT);
+  pinMode(data, OUTPUT);
+  pinMode(latch, OUTPUT);
+
+  // OUTPUTS to 74HC959
+  pinMode(clockpinMatrix, OUTPUT);
+  pinMode(dataMatrix, OUTPUT);
+  pinMode(latchMatrix, OUTPUT);
+
+  // OUTPUTS leds
+  pinMode(led_green, OUTPUT);
+  pinMode(led_yellow, OUTPUT);
+  pinMode(led_red, OUTPUT);
+
+  EEPROM.get(direc_total_dias, contador_total_dias_M);
+  EEPROM.get(direc_record, contador_record_M);
+
+  EEPROM.get(direc_fatal, contador_fatal);
+  EEPROM.get(direc_incapacitantes, contador_incapacitantes_M);
+  EEPROM.get(direc_leve, contador_leve_M);
+  EEPROM.get(direc_incidentes, contador_incidentes_M);
+  EEPROM.get(direc_subestandard, contador_subestandard_M);
+
+  EEPROM.get(direc_semaforo_state, semaforo_state);
+
+  init_displays();
+  cont();
+  leds_semaforo();
+  countMatrix();
+}
+
+void loop() {
+  // Actualizar contadores desde EEPROM
+  EEPROM.get(direc_total_dias, contador_total_dias_M);
+  EEPROM.get(direc_record, contador_record_M);
+  EEPROM.get(direc_fatal, contador_fatal);
+  EEPROM.get(direc_incapacitantes, contador_incapacitantes_M);
+  EEPROM.get(direc_leve, contador_leve_M);
+  EEPROM.get(direc_incidentes, contador_incidentes_M);
+  EEPROM.get(direc_subestandard, contador_subestandard_M);
+  EEPROM.get(direc_semaforo_state, semaforo_state);
+
+  init_displays();
+  cont();
+  leds_semaforo();
+  countMatrix();
+  
+  delay(1000); // Actualizar cada segundo
+}
+
+void leds_semaforo() {
+  switch (semaforo_state) {
+    case 1:
+      digitalWrite(led_green, 1);
+      digitalWrite(led_yellow, 0);
+      digitalWrite(led_red, 0);
+      break;
+    case 2:
+      digitalWrite(led_green, 0);
+      digitalWrite(led_yellow, 1);
+      digitalWrite(led_red, 0);
+      break;
+    case 3:
+      digitalWrite(led_green, 0);
+      digitalWrite(led_yellow, 0);
+      digitalWrite(led_red, 1);
+      break;
+  }
+}
+
+void init_displays() {
+  contador_subestandard_DISPLAY[0] = contador_subestandard_M % 10;           //unidades
+  contador_subestandard_DISPLAY[1] = (contador_subestandard_M / 10) % 10;    //decenas
+  contador_subestandard_DISPLAY[2] = (contador_subestandard_M / 100) % 10;   //centenas
+  contador_subestandard_DISPLAY[3] = (contador_subestandard_M / 1000) % 10;  //decena de millar
+  contador_subestandard_DISPLAY[4] = (contador_subestandard_M / 10000);      //millar
+
+  contador_incidentes_DISPLAY[0] = contador_incidentes_M % 10;          //unidades
+  contador_incidentes_DISPLAY[1] = (contador_incidentes_M / 10) % 10;   //decenas
+  contador_incidentes_DISPLAY[2] = (contador_incidentes_M / 100) % 10;  //centenas
+  contador_incidentes_DISPLAY[3] = (contador_incidentes_M / 1000);      //millar
+
+  contador_leve_DISPLAY[0] = contador_leve_M % 10;         //unidades
+  contador_leve_DISPLAY[1] = (contador_leve_M / 10) % 10;  //decenas
+  contador_leve_DISPLAY[2] = (contador_leve_M / 100);      //centenas
+
+  contador_incapacitantes_DISPLAY[0] = contador_incapacitantes_M % 10;         //unidades
+  contador_incapacitantes_DISPLAY[1] = (contador_incapacitantes_M / 10) % 10;  //decenas
+
+  contador_record_DISPLAY[0] = contador_record_M % 10;         //unidades
+  contador_record_DISPLAY[1] = (contador_record_M / 10) % 10;  //decenas
+  contador_record_DISPLAY[2] = (contador_record_M / 100);      //centenas
+
+  contador_total_dias_DISPLAY[0] = contador_total_dias_M % 10;
+  contador_total_dias_DISPLAY[1] = (contador_total_dias_M / 10) % 10;
+  contador_total_dias_DISPLAY[2] = (contador_total_dias_M / 100);
+}
+
+void cont() {  //funncion salidas para los displays
+  digitalWrite(latch, LOW);
+  
+  //Incidentes
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_incidentes_DISPLAY[0]]);
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_incidentes_DISPLAY[1]]);
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_incidentes_DISPLAY[2]]);
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_incidentes_DISPLAY[3]]);
+
+  //leve
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_leve_DISPLAY[0]]);
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_leve_DISPLAY[1]]);
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_leve_DISPLAY[2]]);
+  shiftOut(data, clockpin, MSBFIRST, NUM[11]);  // APAGADO
+
+  //incapacitantes
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_incapacitantes_DISPLAY[0]]);
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_incapacitantes_DISPLAY[1]]);
+
+  //fatal
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_fatal]);
+  shiftOut(data, clockpin, MSBFIRST, NUM[11]);  // APAGADO
+
+  //RECORD
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_record_DISPLAY[0]]);  // unidades
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_record_DISPLAY[1]]);  // decenas
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_record_DISPLAY[2]]);  // centenas
+  shiftOut(data, clockpin, MSBFIRST, NUM[11]);                          // APAGADO
+
+  //TOTAL DIAS
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_total_dias_DISPLAY[0]]);  // unidades
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_total_dias_DISPLAY[1]]);  // decenas
+  shiftOut(data, clockpin, MSBFIRST, NUM[contador_total_dias_DISPLAY[2]]);  // centenas
+
+  digitalWrite(latch, HIGH);
+}
+
+void countMatrix() {
+  digitalWrite(latchMatrix, LOW);
+  shiftOut(dataMatrix, clockpinMatrix, MSBFIRST, NUM_MATRIX_COLUM[1]);  // columnas
+  shiftOut(dataMatrix, clockpinMatrix, MSBFIRST, NUM_MATRIX_ROW[1]);    // filas
+  digitalWrite(latchMatrix, HIGH);
+}
